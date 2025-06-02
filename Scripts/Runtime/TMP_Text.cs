@@ -2348,6 +2348,25 @@ namespace TMPro
 
                             readIndex += 7;
                             continue;
+
+                        // BEGIN CUSTOM
+                        case MarkupTag.MAPPING:
+                            if (tag_NoParsing) break;
+
+                            int mappingOpenWriteIndex = writeIndex;
+                            if (ReplaceMappingTag(ref m_TextBackingArray, readIndex, out int mappingSrcOffset, ref m_TextProcessingArray, ref writeIndex))
+                            {
+                                for (; mappingOpenWriteIndex < writeIndex; mappingOpenWriteIndex++)
+                                {
+                                    m_TextProcessingArray[mappingOpenWriteIndex].stringIndex = readIndex;
+                                    m_TextProcessingArray[mappingOpenWriteIndex].length = (mappingSrcOffset - readIndex) + 1;
+                                }
+
+                                readIndex = mappingSrcOffset;
+                                continue;
+                            }
+                            break;
+                        // END CUSTOM
                     }
 
                     // Validate potential text markup element
@@ -2867,7 +2886,7 @@ namespace TMPro
             m_TextStyleStackDepth -= 1;
         }
 
-        private void InsertTextStyleInTextProcessingArray(ref TextProcessingElement[] charBuffer, ref int writeIndex, uint[] styleDefinition)
+        private void InsertTextStyleInTextProcessingArray(ref TextProcessingElement[] charBuffer, ref int writeIndex, ReadOnlySpan<uint> styleDefinition)
         {
             int styleLength = styleDefinition.Length;
 
@@ -2975,7 +2994,7 @@ namespace TMPro
                         case MarkupTag.STYLE:
                             if (tag_NoParsing) break;
 
-                            if (ReplaceOpeningStyleTag(ref styleDefinition, i, out int offset, ref charBuffer, ref writeIndex))
+                            if (ReplaceOpeningStyleTag(styleDefinition, i, out int offset, ref charBuffer, ref writeIndex))
                             {
                                 i = offset;
                                 continue;
@@ -3050,10 +3069,10 @@ namespace TMPro
         /// <param name="charBuffer"></param>
         /// <param name="writeIndex"></param>
         /// <returns></returns>
-        bool ReplaceOpeningStyleTag(ref uint[] sourceText, int srcIndex, out int srcOffset, ref TextProcessingElement[] charBuffer, ref int writeIndex)
+        bool ReplaceOpeningStyleTag(ReadOnlySpan<uint> sourceText, int srcIndex, out int srcOffset, ref TextProcessingElement[] charBuffer, ref int writeIndex)
         {
             // Validate <style> tag.
-            int styleHashCode = GetStyleHashCode(ref sourceText, srcIndex + 7, out srcOffset);
+            int styleHashCode = GetStyleHashCode(sourceText, srcIndex + 7, out srcOffset);
             TMP_Style style = GetStyle(styleHashCode);
 
             // Return if we don't have a valid style.
@@ -3151,7 +3170,7 @@ namespace TMPro
         /// <param name="styleDefinition"></param>
         /// <param name="readIndex"></param>
         /// <returns></returns>
-        int GetMarkupTagHashCode(uint[] styleDefinition, int readIndex)
+        int GetMarkupTagHashCode(ReadOnlySpan<uint> styleDefinition, int readIndex)
         {
             int hashCode = 0;
             int maxReadIndex = readIndex + 16;
@@ -3202,7 +3221,7 @@ namespace TMPro
         /// <param name="index"></param>
         /// <param name="closeIndex"></param>
         /// <returns></returns>
-        int GetStyleHashCode(ref uint[] text, int index, out int closeIndex)
+        int GetStyleHashCode(ReadOnlySpan<uint> text, int index, out int closeIndex)
         {
             int hashCode = 0;
             closeIndex = 0;
@@ -6444,7 +6463,7 @@ namespace TMPro
             return true;
         }
 
-        uint GetUTF16(uint[] text, int i)
+        uint GetUTF16(ReadOnlySpan<uint> text, int i)
         {
             uint unicode = 0;
             unicode += HexToInt((char)text[i]) << 12;
@@ -6476,7 +6495,7 @@ namespace TMPro
             return true;
         }
 
-        uint GetUTF32(uint[] text, int i)
+        uint GetUTF32(ReadOnlySpan<uint> text, int i)
         {
             uint unicode = 0;
             unicode += HexToInt((char)text[i]) << 28;
@@ -8365,5 +8384,80 @@ namespace TMPro
 
             return false;
         }
+
+        // BEGIN CUSTOM
+        private static readonly char[] mappingNameBuffer = new char[128];
+        private static int mappingNameLength = 0;
+        bool ReplaceMappingTag(ref TextBackingContainer sourceText, int srcIndex, out int srcOffset, ref TextProcessingElement[] charBuffer, ref int writeIndex)
+        {
+            static bool GetNext(char c, ref TextBackingContainer text, ref int idx)
+            {
+                while(idx < text.Capacity)
+                {
+                    char next = (char)text[idx++];
+                    if (next == c)
+                    {
+                        return true;
+                    }
+                    switch (next)
+                    {
+                        case ' ':
+                        case '\t':
+                            continue;
+                    }
+                    break;
+                }
+                return false;
+            }
+
+            srcOffset = default;
+
+            srcIndex += 8;
+
+            if (!GetNext('=', ref sourceText, ref srcIndex))
+            {
+                return false;
+            }
+            if (!GetNext('"', ref sourceText, ref srcIndex))
+            {
+                return false;
+            }
+
+            mappingNameLength = 0; 
+            while (srcIndex < sourceText.Capacity)
+            {
+                char next = (char)sourceText[srcIndex++];
+                if (next == '"')
+                {
+                    break;
+                }
+                else
+                {
+                    if(mappingNameLength == mappingNameBuffer.Length)
+                    {
+                        return false;
+                    }
+                    mappingNameBuffer[mappingNameLength++] = next;
+                }
+            }
+
+            if (!GetNext('>', ref sourceText, ref srcIndex))
+            {
+                return false;
+            }
+
+            if (mappingNameLength > 0)
+            {
+                var insert = TMP_Mapping.InvokeFormatMappingTagCallback(mappingNameBuffer.AsSpan(0, mappingNameLength));
+                if (insert.Length > 0)
+                {
+                    InsertTextStyleInTextProcessingArray(ref charBuffer, ref writeIndex, insert);
+                }
+            }
+
+            srcOffset = srcIndex - 1;
+            return true;
+        }
+        // END CUSTOM
     }
 }

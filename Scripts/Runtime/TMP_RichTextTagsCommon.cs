@@ -170,6 +170,10 @@ namespace TMPro
         NORMAL = -1183493901,           // <style="Normal">
         DEFAULT = -620974005,           // <font="Default">
         REGULAR = 1291372090,
+
+        // BEGIN CUSTOM
+        MAPPING = -1792951572,
+        // END CUSTOM
     }
 
     /// <summary>
